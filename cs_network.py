@@ -7,7 +7,6 @@ module: cs_network
 short_description: Manages networks on Apache CloudStack based clouds.
 description: create, delete or modify networks
 version_added: '0.1'
-author: Martin Kolly
 options:
 options:
   name:
