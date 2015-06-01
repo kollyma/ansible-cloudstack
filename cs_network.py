@@ -7,6 +7,7 @@ module: cs_network
 short_description: Manages networks on Apache CloudStack based clouds.
 description: create, delete or modify networks
 version_added: '0.1'
+author: Martin Kolly
 options:
 options:
   name:
@@ -27,6 +28,11 @@ options:
       - Name of the zone, where the network should be deployed
     required: yes
     default: null
+  state:
+     - State of the network
+    required: false
+    default: present
+    choices: [ 'present', 'absent' ]
     # Todo: more arguments will follow...
 '''
 
@@ -47,6 +53,7 @@ class AnsibleCloudStack:
         self._connect()
 
         self.project_id = None
+        self.network_id = None
         self.ip_address_id = None
         self.zone_id = None
         self.vm_id = None
@@ -88,43 +95,15 @@ class AnsibleCloudStack:
         self.module.fail_json(msg="project '%s' not found" % project)
 
 
-    def get_network_id(self):
-        if self.network_id:
-            return self.network_id
-        
-        networks = self.cs.listNetworks()
-        if networks:
-           for o in networks['network']:
-              if network in [ o['name'] ]:
-                 self.network_id = o['id']
-                 return self.project_id
-        self.module.fail_json(msg="network '%s' not found" % network)
-
-    def get_network_offering_id(self):
-        network_offering = self.module.params.get('network_offering')
-
-        network_offerings = self.cs.listNetworkOfferings()
-        if network_offerings:
-            if not network_offering:
-                return network_offerings['networkoffering'][0]['id']
-
-            for n in network_offerings['networkoffering']:
-                if network_offering in [ n['name'], n['id'] ]:
-                    return n['id']
-        self.module.fail_json(msg="Network offering '%s' not found" % network_offering)
-
     def get_zone_id(self):
         if self.zone_id:
             return self.zone_id
-
         zone = self.module.params.get('zone')
         zones = self.cs.listZones()
-
         # use the first zone if no zone param given
         if not zone:
             self.zone_id = zones['zone'][0]['id']
             return self.zone_id
-
         if zones:
             for z in zones['zone']:
                 if zone in [ z['name'], z['id'] ]:
@@ -145,7 +124,6 @@ class AnsibleCloudStack:
                 time.sleep(2)
         return job
 
-
 class AnsibleCloudStackNetwork(AnsibleCloudStack):
 
     def __init__(self, module):
@@ -165,12 +143,23 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
             args['zoneid'] = self.get_zone_id()
             args['networkofferingid'] = self.get_network_offering_id()
             # optional args will follow
-
             if not self.module.check_mode:
                 network = self.cs.createNetwork(**args)
-
                 if 'errortext' in network:
                     self.module.fail_json(msg="Failed: '%s'" % network['errortext'])
+                poll_async = self.module.params.get('poll_async')
+                if poll_async:
+                    network = self._poll_job(network, 'network')
+            return network
+
+    def remove_network(self):
+        network = self.get_network()
+        if network:
+            self.result['changed'] = True
+            if not self.module.check_mode:
+                network = self.cs.deleteNetwork(id=network['id'])
+		if 'errortext' in network:
+                   self.module.fail_json(msg="Failed: '%s'" % network['errortext'])
 
                 poll_async = self.module.params.get('poll_async')
                 if poll_async:
@@ -178,21 +167,29 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
             return network
 
     def get_network(self):
-        
         args = {}
-        args['displaytext'] = self.module.params.get('display_name')
         args['name'] = self.module.params.get('name')
-        args['zoneid'] = self.get_zone_id()
-        args['networkofferingid'] = self.get_network_offering_id()
-
+        args['state'] = self.module.params.get('state')
         networks = self.cs.listNetworks()
         if networks:
             for n in networks['network']:
                 if args['name'] in [ n['name'], n['id'] ]:
+                    return n
+        return None
+        
+    def get_network_offering_id(self):
+        network_offering = self.module.params.get('network_offering')
+
+        network_offerings = self.cs.listNetworkOfferings()
+        if network_offerings:
+            if not network_offering:
+                return network_offerings['networkoffering'][0]['id']
+
+            for n in network_offerings['networkoffering']:
+                if network_offering in [ n['name'], n['id'] ]:
                     return n['id']
-                else:
-                    return None
         self.module.fail_json(msg="Network offering '%s' not found" % network_offering)
+        
 
     def get_result(self, network):
         if network:
@@ -204,6 +201,22 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
                 self.result['display_name'] = network['displayname']
         return self.result
 
+
+    def get_network_id(self):
+        if self.network_id:
+            return self.network_id
+        
+        network = self.module.params.get('name')
+        if not network:
+            return None
+
+        networks = self.cs.listNetworks()
+        if networks:
+            for n in networks['network']:
+                if network in [ n['name'], n['displaytext'], n['id'] ]:
+                    self.network_id = n['id']
+                    return self.network_id
+        self.module.fail_json(msg="network '%s' not found" % network)
 
 def main():
     module = AnsibleModule(
