@@ -7,7 +7,6 @@ module: cs_network
 short_description: Manages networks on Apache CloudStack based clouds.
 description: create, delete or modify networks
 version_added: '0.1'
-author: Martin Kolly
 options:
 options:
   name:
@@ -29,12 +28,22 @@ options:
     required: yes
     default: null
   state:
-     - State of the network
+      - State of the network
     required: false
     default: present
     choices: [ 'present', 'absent' ]
-    # Todo: more arguments will follow...
+  project:
+      - Name of the project, where the network should be deployed
+    required: false
+    default: false
+  domain:
+      - Name of the Domain, where the network should be deployed
 '''
+
+EXAMPLES = '''
+---
+'''
+
 
 try:
     from cs import CloudStack, CloudStackException, read_config
@@ -51,7 +60,6 @@ class AnsibleCloudStack:
 
         self.module = module
         self._connect()
-
         self.project_id = None
         self.network_id = None
         self.ip_address_id = None
@@ -140,9 +148,9 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
             args = {}
             args['displaytext'] = self.module.params.get('display_name')
             args['name'] = self.module.params.get('name')
+            args['projectid'] = self.get_project_id()
             args['zoneid'] = self.get_zone_id()
             args['networkofferingid'] = self.get_network_offering_id()
-            # optional args will follow
             if not self.module.check_mode:
                 network = self.cs.createNetwork(**args)
                 if 'errortext' in network:
@@ -160,7 +168,6 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
                 network = self.cs.deleteNetwork(id=network['id'])
 		if 'errortext' in network:
                    self.module.fail_json(msg="Failed: '%s'" % network['errortext'])
-
                 poll_async = self.module.params.get('poll_async')
                 if poll_async:
                     network = self._poll_job(network, 'network')
@@ -223,8 +230,10 @@ def main():
         argument_spec = dict(
             name = dict(required=True),
             display_name = dict(default=None),
-            network_offering = dict(default=None),
-            zone = dict(default=None),
+            network_offering = dict(required=True),
+            zone = dict(required=True),
+            project = dict(default=None),
+            domain = dict(default=None),
             state = dict(choices=['present', 'absent'], default='present'),
             tags = dict(type='list', aliases=[ 'tag' ], default=None),
             poll_async = dict(choices=BOOLEANS, default=True),
